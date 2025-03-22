@@ -2,7 +2,7 @@
 control_dt: 0.02
 
 msg_type: "go"     # "hg" or "go"
-imu_type: "torso"    # "torso" or "pelvis"
+imu_type: "torso"    # "torso" or "pelvis"  
 
 weak_motor: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 

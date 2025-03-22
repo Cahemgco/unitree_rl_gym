@@ -1,8 +1,14 @@
+
+import sys
+sys.path.append("/home/mmj/sim2real_g2w/unitree_rl_gym/")
+
+
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from typing import Union
 import numpy as np
 import time
 import torch  
+
 
 # region ########### Unitree通信相关导入 ###########
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelFactoryInitialize
@@ -25,20 +31,21 @@ class Controller:
     def __init__(self, config: Config) -> None:
         # region ########### 初始化阶段 ###########
         # 1. 配置加载
-        self.config = config # 加载配置
-        self.remote_controller = RemoteController() # 初始化远程控制器
+        self.config = config
+        self.remote_controller = RemoteController()
 
         # 2. 策略网络加载
-        self.policy = torch.jit.load(config.policy_path) # 加载训练好的策略网络模型
+        self.policy = torch.jit.load(config.policy_path)
         
         # 3. 过程变量初始化
-        self.qj = np.zeros(config.num_actions, dtype=np.float32) # 初始化关节位置
-        self.dqj = np.zeros(config.num_actions, dtype=np.float32) # 初始化关节速度
-        self.action = np.zeros(config.num_actions, dtype=np.float32) # 初始化action
-        self.target_dof_pos = config.default_angles.copy() # 复制默认关节角度作为目标位置
-        self.obs = np.zeros(config.num_obs, dtype=np.float32) # 初始化观测向量
-        self.cmd = np.array([0.0, 0, 0]) # 初始化速度指令
-        self.counter = 0 # 初始化计数器
+        self.qj = np.zeros(config.num_actions, dtype=np.float32)
+        self.dqj = np.zeros(config.num_actions, dtype=np.float32)
+        self.action = np.zeros(config.num_actions, dtype=np.float32)
+        self.target_dof_pos = config.default_angles.copy()
+        self.obs = np.zeros(config.num_obs, dtype=np.float32)
+        self.cmd = np.array([0.0, 0, 0])
+        self.counter = 0
+        self.lin_vel = np.array([0.0, 0.0, 0.0])
 
         # 4. DDS通信初始化
         if config.msg_type == "hg":
@@ -55,7 +62,6 @@ class Controller:
             self.lowstate_subscriber.Init(self.LowStateHgHandler, 10)
 
         elif config.msg_type == "go":
-            # H1 Gen1使用go消息类型
             self.low_cmd = unitree_go_msg_dds__LowCmd_()
             self.low_state = unitree_go_msg_dds__LowState_()
 
@@ -72,10 +78,8 @@ class Controller:
         if config.msg_type == "hg":
             init_cmd_hg(self.low_cmd, self.mode_machine_, self.mode_pr_)
         elif config.msg_type == "go":
-            init_cmd_go(self.low_cmd, weak_motor=self.config.weak_motor)
+            init_cmd_go(self.low_cmd)
         # endregion
-
-        # 上面是人形机器人如何收发命令，机器狗需要更改底层传输的命令
 
     # region ########### 状态回调处理 ###########
     def LowStateHgHandler(self, msg: LowStateHG):
@@ -90,12 +94,12 @@ class Controller:
         self.remote_controller.set(self.low_state.wireless_remote)
     # endregion
 
-    def send_cmd(self, cmd: Union[LowCmdGo, LowCmdHG]): # 发送指令
+    def send_cmd(self, cmd: Union[LowCmdGo, LowCmdHG]):
         """发送指令（自动添加CRC校验）"""
         cmd.crc = CRC().Crc(cmd)
-        self.lowcmd_publisher_.Write(cmd) 
+        self.lowcmd_publisher_.Write(cmd)
 
-    def wait_for_low_state(self): # 等待命令
+    def wait_for_low_state(self):
         """等待直到收到底层状态数据"""
         while self.low_state.tick == 0:
             time.sleep(self.config.control_dt)
@@ -112,8 +116,8 @@ class Controller:
         print("Waiting for the start signal...")
         while self.remote_controller.button[KeyMap.start] != 1:
             create_zero_cmd(self.low_cmd)
-            self.send_cmd(self.low_cmd) # 发送零力矩命令
-            time.sleep(self.config.control_dt)  # 这个控制零力矩命令就是把所有电机都设置为0不用改
+            self.send_cmd(self.low_cmd)
+            time.sleep(self.config.control_dt)
 
     def move_to_default_pos(self):
         """
@@ -122,21 +126,22 @@ class Controller:
         """
         print("Moving to default pos.")
         total_time = 2
-        num_step = int(total_time / self.config.control_dt) # 计算需要几步
+        num_step = int(total_time / self.config.control_dt)
         
-        # 组合腿部与手臂/腰部的关节索引
-        dof_idx = self.config.leg_joint2motor_idx + self.config.arm_waist_joint2motor_idx
-        kps = self.config.kps + self.config.arm_waist_kps
-        kds = self.config.kds + self.config.arm_waist_kds
-        default_pos = np.concatenate((self.config.default_angles, self.config.arm_waist_target), axis=0)
+        dof_idx = self.config.joint2motor_idx
+        kps = self.config.kps 
+        kds = self.config.kds 
+        default_pos = self.config.default_angles
         dof_size = len(dof_idx)
         
         # 记录初始位置
         init_dof_pos = np.zeros(dof_size, dtype=np.float32)
         for i in range(dof_size):
             init_dof_pos[i] = self.low_state.motor_state[dof_idx[i]].q
+        print(default_pos)
+        print(init_dof_pos)
         
-        # 执行插值运动
+        # # 执行插值运动
         for i in range(num_step):
             alpha = i / num_step
             for j in range(dof_size):
@@ -160,21 +165,12 @@ class Controller:
         print("Waiting for the Button A signal...")
         while self.remote_controller.button[KeyMap.A] != 1:
             # 腿部关节控制
-            for i in range(len(self.config.leg_joint2motor_idx)):
-                motor_idx = self.config.leg_joint2motor_idx[i]
+            for i in range(len(self.config.joint2motor_idx)):
+                motor_idx = self.config.joint2motor_idx[i]
                 self.low_cmd.motor_cmd[motor_idx].q = self.config.default_angles[i]
                 self.low_cmd.motor_cmd[motor_idx].qd = 0
                 self.low_cmd.motor_cmd[motor_idx].kp = self.config.kps[i]
                 self.low_cmd.motor_cmd[motor_idx].kd = self.config.kds[i]
-                self.low_cmd.motor_cmd[motor_idx].tau = 0
-            
-            # 手臂/腰部关节控制（机器狗可移除）
-            for i in range(len(self.config.arm_waist_joint2motor_idx)):
-                motor_idx = self.config.arm_waist_joint2motor_idx[i]
-                self.low_cmd.motor_cmd[motor_idx].q = self.config.arm_waist_target[i]
-                self.low_cmd.motor_cmd[motor_idx].qd = 0
-                self.low_cmd.motor_cmd[motor_idx].kp = self.config.arm_waist_kps[i]
-                self.low_cmd.motor_cmd[motor_idx].kd = self.config.arm_waist_kds[i]
                 self.low_cmd.motor_cmd[motor_idx].tau = 0
                 
             self.send_cmd(self.low_cmd)
@@ -185,95 +181,78 @@ class Controller:
         """主控制循环（每个控制周期执行）"""
         self.counter += 1
         
-        # region ########### 状态采集 ###########
-        # 1. 关节状态采集
-        for i in range(len(self.config.leg_joint2motor_idx)):
-            self.qj[i] = self.low_state.motor_state[self.config.leg_joint2motor_idx[i]].q
-            self.dqj[i] = self.low_state.motor_state[self.config.leg_joint2motor_idx[i]].dq
+        # 获得机器人电机数据
+        for i in range(len(self.config.joint2motor_idx)):
+            self.qj[i] = self.low_state.motor_state[self.config.joint2motor_idx[i]].q # 关机反馈位置信息：默认为弧度值
+            self.dqj[i] = self.low_state.motor_state[self.config.joint2motor_idx[i]].dq # 关节反馈速度
 
-        # 2. IMU数据处理
-        quat = self.low_state.imu_state.quaternion  # 四元数格式: w, x, y, z
+        # 机器人线速度
+        self.lin_vel = self.lin_vel + self.config.control_dt * np.array([self.low_state.imu_state.accelerometer], dtype=np.float32)
+
+        # 机器人角速度
         ang_vel = np.array([self.low_state.imu_state.gyroscope], dtype=np.float32)
-
-        # 人形机器人需要转换IMU坐标系（机器狗可能不需要）
-        if self.config.imu_type == "torso":
-            waist_yaw = self.low_state.motor_state[self.config.arm_waist_joint2motor_idx[0]].q
-            waist_yaw_omega = self.low_state.motor_state[self.config.arm_waist_joint2motor_idx[0]].dq
-            quat, ang_vel = transform_imu_data(
-                waist_yaw=waist_yaw,
-                waist_yaw_omega=waist_yaw_omega,
-                imu_quat=quat,
-                imu_omega=ang_vel
-            )
-        # endregion
-
-        # region ########### 观测构建 ###########
-        gravity_orientation = get_gravity_orientation(quat)
-        qj_obs = (self.qj - self.config.default_angles) * self.config.dof_pos_scale
-        dqj_obs = self.dqj * self.config.dof_vel_scale
         ang_vel = ang_vel * self.config.ang_vel_scale
-        
-        # 步态相位生成（机器狗需要调整）
-        period = 0.8
-        count = self.counter * self.config.control_dt
-        phase = count % period / period
-        sin_phase = np.sin(2 * np.pi * phase)
-        cos_phase = np.cos(2 * np.pi * phase)
 
-        # 遥控指令处理
+        # 重力向量
+        quat = self.low_state.imu_state.quaternion  # 四元数格式: w, x, y, z
+        gravity_orientation = get_gravity_orientation(quat)
+
+        # 关节速度
+        dqj_obs = self.dqj * self.config.dof_vel_scale
+
+        # 关节位置
+        qj_obs = self.qj
+        qj_obs[self.config.wheel_indices] = 0
+
+        # 关节误差
+        err_obs = (self.qj - self.config.default_angles) * self.config.dof_pos_scale
+        err_obs[self.config.wheel_indices] = 0
+        
+        # 外部控制命令
         self.cmd[0] = self.remote_controller.ly  # 前后速度
         self.cmd[1] = self.remote_controller.lx * -1  # 横向速度
         self.cmd[2] = self.remote_controller.rx * -1  # 旋转速度
 
         # 观测向量构建
         num_actions = self.config.num_actions
-        self.obs[:3] = ang_vel                # 角速度
-        self.obs[3:6] = gravity_orientation    # 重力方向
-        self.obs[6:9] = self.cmd * self.config.cmd_scale * self.config.max_cmd  # 速度指令
-        self.obs[9:9+num_actions] = qj_obs     # 关节位置
-        self.obs[9+num_actions:9+num_actions*2] = dqj_obs  # 关节速度
-        self.obs[9+num_actions*2:9+num_actions*3] = self.action  # 历史动作
-        self.obs[9+num_actions*3] = sin_phase  # 步态正弦相位
-        self.obs[9+num_actions*3+1] = cos_phase# 步态余弦相位
+
+        self.obs[:3] = self.lin_vel # 线速度
+        self.obs[3:6] = ang_vel # 角速度
+        self.obs[6:9] = gravity_orientation    # 重力向量
+        self.obs[9:12] = self.cmd * self.config.cmd_scale * self.config.max_cmd  # 外部控制指令
+        # 左摇杆的前后，控制机器人的x方向的运动速度 
+        # 左摇杆的左右，控制机器人的y方向的运动速度 
+        # 右摇杆的左右，控制机器人的偏航角的运动速度
+        self.obs[12:12+num_actions] = err_obs# 关节位置误差
+        self.obs[12+num_actions:12+num_actions*2] = dqj_obs     # 关节速度
+        self.obs[12+num_actions*2:12+num_actions*3] = qj_obs  # 关节位置
+        self.obs[12+num_actions*3:12+num_actions*4] = self.action  # 历史动作
         # endregion
 
         # region ########### 策略推理 ###########
         obs_tensor = torch.from_numpy(self.obs).unsqueeze(0)
-        # 上面的代码都在生成观测数据
-
-
         self.action = self.policy(obs_tensor).detach().numpy().squeeze()
-        # 把观测数据喂到模型里得到action
-
-
         target_dof_pos = self.config.default_angles + self.action * self.config.action_scale
-        # 计算关节目标位置
-
         # endregion
+
+        # 将 self.obs 写入文件
+        file_path = "/home/mmj/sim2real_g2w/unitree_rl_gym/deploy/observations.log"  # 文件路径
+        with open(file_path, "a") as file:  # 以追加模式打开文件
+        # 将 self.obs 转换为字符串并写入文件
+            file.write(",".join(map(str, self.obs)) + "\n")
 
         # region ########### 指令发送 ###########
         # 腿部关节指令设置
-        for i in range(len(self.config.leg_joint2motor_idx)):
-            motor_idx = self.config.leg_joint2motor_idx[i]
+        for i in range(len(self.config.joint2motor_idx)):
+            motor_idx = self.config.joint2motor_idx[i]
             self.low_cmd.motor_cmd[motor_idx].q = target_dof_pos[i]
             self.low_cmd.motor_cmd[motor_idx].qd = 0
             self.low_cmd.motor_cmd[motor_idx].kp = self.config.kps[i]
             self.low_cmd.motor_cmd[motor_idx].kd = self.config.kds[i]
             self.low_cmd.motor_cmd[motor_idx].tau = 0
 
-        # 手臂/腰部指令设置（机器狗可移除）
-        for i in range(len(self.config.arm_waist_joint2motor_idx)):
-            motor_idx = self.config.arm_waist_joint2motor_idx[i]
-            self.low_cmd.motor_cmd[motor_idx].q = self.config.arm_waist_target[i]
-            self.low_cmd.motor_cmd[motor_idx].qd = 0
-            self.low_cmd.motor_cmd[motor_idx].kp = self.config.arm_waist_kps[i]
-            self.low_cmd.motor_cmd[motor_idx].kd = self.config.arm_waist_kds[i]
-            self.low_cmd.motor_cmd[motor_idx].tau = 0
-
-        # 上面就是描述如何发送指令，直接改用机器狗的逻辑就行
-
-        self.send_cmd(self.low_cmd) # 把命令发送过去
-        time.sleep(self.config.control_dt) # 等待控制周期
+        self.send_cmd(self.low_cmd)
+        time.sleep(self.config.control_dt)
         # endregion
 
 if __name__ == "__main__":
@@ -295,16 +274,17 @@ if __name__ == "__main__":
     controller = Controller(config)
 
     # region ########### 状态机执行流程 ###########
-    # 阶段1: 零力矩模式
+    # 阶段1: 零力矩安全状态
     controller.zero_torque_state()
     
-    # 阶段2: 调试模式（阻尼状态）
+    # 阶段2: 平滑归位运动
     controller.move_to_default_pos()
     
-    # 阶段3: 默认姿态保持
+    # # 阶段3: 默认姿态保持
     controller.default_pos_state()
     
-    # 阶段4: 主控制循环
+    print('RL Begin---------')
+    # # 阶段4: 主控制循环
     while True:
         try:
             controller.run()
@@ -313,7 +293,7 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             break
     
-    # 阶段5: 退出时进入阻尼模式
+    # # 阶段5: 退出时进入阻尼模式
     create_damping_cmd(controller.low_cmd)
     controller.send_cmd(controller.low_cmd)
     print("Exit")

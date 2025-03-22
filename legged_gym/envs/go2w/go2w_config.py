@@ -1,23 +1,26 @@
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
 class GO2WRoughCfg( LeggedRobotCfg ):
+    # 训练环境类
     class env(LeggedRobotCfg.env):
-        num_envs = 6000
-        num_actions = 16
-        num_observations = 77 + 187
+        num_envs = 6000 # 强化学习同时训练智能体的数量
+        num_actions = 16 # 可操控的动作数量
+        num_observations = 76 # 强化学习观测值的数量  
     
+    # 机器人指令类
     class commands( LeggedRobotCfg ):
-        curriculum = True
-        max_curriculum = 1.5
-        num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 10. # time before command are changed[s]
+        curriculum = True # 是否使用课程学习
+        max_curriculum = 1.5 # 课程难度最高级
+        num_commands = 4 # 指令的个数：x轴方向线速度，y轴方向线速度，角速度以及航向
+        resampling_time = 10. # 指令更改的时间
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-1.5, 1.5] # min max [m/s]
-            lin_vel_y = [-0, 0]   # min max [m/s]
-            ang_vel_yaw = [-0, 0]    # min max [rad/s]
-            heading = [-3.14, 3.14]
+            lin_vel_x = [-1.5, 1.5] # min max [m/s] x轴方向线速度
+            lin_vel_y = [-0, 0]   # min max [m/s] y轴方向线速度
+            ang_vel_yaw = [-0, 0]    # min max [rad/s] 角速度
+            heading = [-3.14, 3.14] # 航向
 
+    # 地形类，被注释掉了？
     # class terrain(LeggedRobotCfg.terrain):
     #     mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
     #     horizontal_scale = 0.1 # [m]
@@ -43,8 +46,10 @@ class GO2WRoughCfg( LeggedRobotCfg ):
     #     # trimesh only:
     #     slope_treshold = 0.75 # slopes above this threshold will be corrected to vertical surfaces
 
+    # 机器人初始状态
     class init_state( LeggedRobotCfg.init_state ):
-        pos = [0.0, 0.0, 0.5] # x,y,z [m]
+        pos = [0.0, 0.0, 0.5] # x,y,z [m] 初始位置 四元数表示
+        # 初始关节位置
         default_joint_angles = { # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0.0,   # [rad]
             'RL_hip_joint': 0.0,   # [rad]
@@ -68,49 +73,55 @@ class GO2WRoughCfg( LeggedRobotCfg ):
 
         }
         init_joint_angles = { # = target angles [rad] when action = 0.0
-            'FL_hip_joint': 0.0,   # [rad]
+            'FL_hip_joint': 0.0,   # [rad] 机身
             'RL_hip_joint': 0.0,   # [rad]
             'FR_hip_joint': 0.0 ,  # [rad]
             'RR_hip_joint': 0.0,   # [rad]
 
-            'FL_thigh_joint': 0.67,     # [rad]
+            'FL_thigh_joint': 0.67,     # [rad] 大腿
             'RL_thigh_joint': 0.67,   # [rad]
             'FR_thigh_joint': 0.67,     # [rad]
             'RR_thigh_joint': 0.67,   # [rad]
 
-            'FL_calf_joint': -1.3,   # [rad]
+            'FL_calf_joint': -1.3,   # [rad] 小腿
             'RL_calf_joint': -1.3,    # [rad]
             'FR_calf_joint': -1.3,  # [rad]
-            'RR_calf_joint': -1.3,    # [rad]
+            'RR_calf_joint': -1.3,    # [rad] 
 
-            'FL_foot_joint':0.0,
+            'FL_foot_joint':0.0, # 轮足
             'RL_foot_joint':0.0,
             'FR_foot_joint':0.0,
             'RR_foot_joint':0.0,
         }
 
+    # 机器人关节电机控制模式、参数
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
-        control_type = 'P'
-        stiffness = {'hip_joint': 50.,'thigh_joint': 50.,'calf_joint': 50.,"foot_joint":20}  # [N*m/rad]
-        damping = {'hip_joint': 1,'thigh_joint': 1,'calf_joint': 1,"foot_joint":0.5}     # [N*m*s/rad]
+        control_type = 'P' # 位置控制、速度控制、扭矩控制
+        
+        stiffness = {'hip_joint': 50.,'thigh_joint': 50.,'calf_joint': 50.,"foot_joint":20}  # [N*m/rad] 刚度系数k_p 
+        damping = {'hip_joint': 1,'thigh_joint': 1,'calf_joint': 1,"foot_joint":0.5}     # [N*m*s/rad] 阻尼系数k_d
         # action scale: target angle = actionScale * action + defaultAngle
+        # 乘一个缩放因子，目的是让动作值适应不同关节的运动范围
         action_scale = 0.25
         # decimation: Number of control action updates @ sim DT per policy DT
+        # 仿真环境的控制频率/decimation = 实际环境中的控制频率
         decimation = 4
         wheel_speed = 1
-        
+
+    # 与机器人urdf相关参数
     class asset( LeggedRobotCfg.asset ):
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go2w/urdf/go2w.urdf'
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go2w/urdf/go2w.urdf' # 存放位置
         name = "go2w"
         foot_name = "foot"
-        wheel_name =["foot"]
-        penalize_contacts_on = ["thigh", "calf", "base"]
+        wheel_name =["foot"] 
+        penalize_contacts_on = ["thigh", "calf", "base"] # 惩罚接触
         terminate_after_contacts_on = []
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter "base","calf","hip","thigh"
         replace_cylinder_with_capsule = False
         flip_visual_attachments = True
-  
+    
+    # 奖励函数
     class rewards( LeggedRobotCfg.rewards ):
         only_positive_rewards = True # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.4 # tracking reward = exp(-error^2/sigma)
@@ -149,5 +160,6 @@ class GO2WRoughCfgPPO( LeggedRobotCfgPPO ):
         num_steps_per_env = 48 # per iteration
         max_iterations = 1500
         # load_run = "/home/zifanw/rl_robot/legged-robots-manipulation/loco_manipulation_gym/logs/Go2w/Jan21_02-18-32_"
+        load_run = "/home/hu/csq/unitree_rl_gym/logs/rough_go2w/Mar21_11-43-16_plain"
         # checkpoint =1550
   

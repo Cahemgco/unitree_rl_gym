@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/home/shirc/unitree_rl_gym-main/")
+sys.path.append("/home/hu/csq/unitree_rl_gym")
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
 import sys
@@ -29,7 +29,9 @@ def play(args):
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    obs = env.get_observations()
+    obs = env.get_observations() # 获得观测的环境信息
+    obs_size = obs.size()
+    print("Observation tensor size:", obs_size)
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
@@ -42,8 +44,8 @@ def play(args):
         print('Exported policy as jit script to: ', path)
 
     for i in range(10*int(env.max_episode_length)):
-        actions = policy(obs.detach())
-        obs, _, rews, dones, infos = env.step(actions.detach())
+        actions = policy(obs.detach()) # 将张量obs从计算图中分离出来，避免梯度传播
+        obs, _, rews, dones, infos = env.step(actions.detach()) # 获得新的观测
 
 if __name__ == '__main__':
     EXPORT_POLICY = True

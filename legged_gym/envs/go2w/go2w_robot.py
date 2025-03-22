@@ -2,7 +2,7 @@ from legged_gym import LEGGED_GYM_ROOT_DIR, envs
 from time import time
 from warnings import WarningMessage
 import numpy as np
-import os
+import os  
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
@@ -26,25 +26,29 @@ class Go2w(LeggedRobot):
         Args:
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
-        clip_actions = self.cfg.normalization.clip_actions
+        clip_actions = self.cfg.normalization.clip_actions # 将动作限制在clip_actions参数范围内
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
         # step physics and render each frame
-        self.render()
-        for _ in range(self.cfg.control.decimation):
-            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+        self.render() # 渲染环境，可视化
+        for _ in range(self.cfg.control.decimation): # 在每个控制周期中进行多少次物理步进
+            self.torques = self._compute_torques(self.actions).view(self.torques.shape) 
+            # 根据action计算扭矩
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
-            self.gym.simulate(self.sim)
+            # 将计算得到的扭矩应用到仿真环境中的关节上。
+            self.gym.simulate(self.sim) # 更新环境状态
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
-        self.post_physics_step()
+        self.post_physics_step() # 物理仿真步进后额外处理
 
         # return clipped obs, clipped states (None), rewards, dones and infos
         clip_obs = self.cfg.normalization.clip_observations
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+        # 裁剪观测值
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
+        # 裁剪后的观测值，额外的观测信息，奖励缓冲区，重置缓冲区，额外信息 
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -99,7 +103,7 @@ class Go2w(LeggedRobot):
 
         # compute observations, rewards, resets, ...
         self.check_termination()
-        self.compute_reward()
+        self.compute_reward() # 计算奖励
         #print("**self.reset_buf_buf:",self.reset_buf)
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
@@ -195,7 +199,7 @@ class Go2w(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
-
+        # print('计算')
         #self._local_gripper_pos = torch.zeros((self.num_envs,3),dtype=torch.float,device=self.device)
 
         self.base_height_command = torch.tensor(self.cfg.rewards.base_height_target,dtype=torch.float,device=self.device)
@@ -203,24 +207,30 @@ class Go2w(LeggedRobot):
         self.dof_err = self.dof_pos - self.default_dof_pos
         self.dof_err[:,self.wheel_indices] = 0
         self.dof_pos[:,self.wheel_indices] = 0
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
-                                    self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    self.base_height_command,
-                                    self.dof_err * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.dof_pos,
-                                    self.actions,
+        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel, # 机器人基座线速度 解决
+                                    self.base_ang_vel  * self.obs_scales.ang_vel, # 机器人基座角速度 解决
+                                    self.projected_gravity, # 重力向量 解决
+                                    self.commands[:, :3] * self.commands_scale, # 外部控制命令 解决
+                                    # self.base_height_command, # 基座机器人高度
+                                    self.dof_err * self.obs_scales.dof_pos, # 关节误差 待确认
+                                    self.dof_vel * self.obs_scales.dof_vel, # 关节速度 待确认
+                                    self.dof_pos, # 关节位置 待确认
+                                    self.actions, # 动作输入 解决
                                     ),dim=-1)
+        # lin_vel = 2.0 ang_vel = 0.25 dof_pos = 1.0 dof_vel = 0.05 height_measurements = 5.0 clip_observations = 100. clip_actions = 100.
         # add perceptive inputs if not blind
-        if self.cfg.terrain.measure_heights:
-            heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
-            self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
+        #if self.cfg.terrain.measure_heights:
+        #   heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+        #    print(heights.size())
+        #    print(self.obs_buf.size())
+        #    self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1) # 高度测量
+        #    print('有高度测量值')
         # add noise if needed
         if self.add_noise:
-            self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
-
+            # print('有噪声')
+            self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec # 添加噪声
+            # print(self.obs_buf.size())
+             
     def create_sim(self):
         """ Creates simulation, terrain and evironments
         """
