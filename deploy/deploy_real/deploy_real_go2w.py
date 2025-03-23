@@ -186,74 +186,79 @@ class Controller:
             self.qj[i] = self.low_state.motor_state[self.config.joint2motor_idx[i]].q # 关机反馈位置信息：默认为弧度值
             self.dqj[i] = self.low_state.motor_state[self.config.joint2motor_idx[i]].dq # 关节反馈速度
 
-        # 机器人线速度
+        # 机器人线速度，有待解决，最后再看吧
         self.lin_vel = self.lin_vel + self.config.control_dt * np.array([self.low_state.imu_state.accelerometer], dtype=np.float32)
+        lin_vel_obs = self.lin_vel * self.config.lin_vel_scale
 
         # 机器人角速度
         ang_vel = np.array([self.low_state.imu_state.gyroscope], dtype=np.float32)
-        ang_vel = ang_vel * self.config.ang_vel_scale
+        ang_vel_obs = ang_vel * self.config.ang_vel_scale
 
         # 重力向量
         quat = self.low_state.imu_state.quaternion  # 四元数格式: w, x, y, z
-        gravity_orientation = get_gravity_orientation(quat)
-
-        # 关节速度
-        dqj_obs = self.dqj * self.config.dof_vel_scale
-
-        # 关节位置
-        qj_obs = self.qj
-        qj_obs[self.config.wheel_indices] = 0
-
-        # 关节误差
-        err_obs = (self.qj - self.config.default_angles) * self.config.dof_pos_scale
-        err_obs[self.config.wheel_indices] = 0
+        gravity_orientation = get_gravity_orientation(quat) # 根据IMU返回的机身姿态四元数，将重力向量的方向调转过来
         
         # 外部控制命令
         self.cmd[0] = self.remote_controller.ly  # 前后速度
         self.cmd[1] = self.remote_controller.lx * -1  # 横向速度
         self.cmd[2] = self.remote_controller.rx * -1  # 旋转速度
+        # ly,lx分别指左摇杆的y轴和x轴坐标，同理rx指右摇杆的x轴坐标，范围都是[-1, 1] 
+        # 乘command_scale后范围变为[-0.5, 0.5] [-0.5, 0.5] [-0.25, 0.25] 
+        # 这样设置是为了使得给机器狗发布的命令不超过训练时候的范围
+        # 训练范围设置的比较小是因为719场地小害怕损坏机器狗
+
+        # 关节误差
+        err_obs = self.qj - self.config.default_angles
+        err_obs[self.config.wheel_indices] = 0
+        err_obs = err_obs * self.config.dof_err_scale
+        
+        # 关节速度
+        dqj_obs = self.dqj * self.config.dof_vel_scale
+
+        # 目前关节位置
+        qj_obs = self.qj
+        qj_obs[self.config.wheel_indices] = 0
 
         # 观测向量构建
         num_actions = self.config.num_actions
-
-        self.obs[:3] = self.lin_vel # 线速度
-        self.obs[3:6] = ang_vel # 角速度
-        self.obs[6:9] = gravity_orientation    # 重力向量
-        self.obs[9:12] = self.cmd * self.config.cmd_scale * self.config.max_cmd  # 外部控制指令
-        # 左摇杆的前后，控制机器人的x方向的运动速度 
-        # 左摇杆的左右，控制机器人的y方向的运动速度 
-        # 右摇杆的左右，控制机器人的偏航角的运动速度
-        self.obs[12:12+num_actions] = err_obs# 关节位置误差
-        self.obs[12+num_actions:12+num_actions*2] = dqj_obs     # 关节速度
+        
+        self.obs[:3] = lin_vel_obs # 线速度
+        self.obs[3:6] = ang_vel_obs # 角速度
+        self.obs[6:9] = gravity_orientation # 重力向量
+        self.obs[9:12] = self.cmd * self.config.cmd_scale # 外部控制指令
+        self.obs[12:12+num_actions] = err_obs # 关节位置和默认位置误差
+        self.obs[12+num_actions:12+num_actions*2] = dqj_obs # 关节速度
         self.obs[12+num_actions*2:12+num_actions*3] = qj_obs  # 关节位置
         self.obs[12+num_actions*3:12+num_actions*4] = self.action  # 历史动作
-        # endregion
-
-        # region ########### 策略推理 ###########
-        obs_tensor = torch.from_numpy(self.obs).unsqueeze(0)
-        self.action = self.policy(obs_tensor).detach().numpy().squeeze()
-        target_dof_pos = self.config.default_angles + self.action * self.config.action_scale
-        # endregion
-
-        # 将 self.obs 写入文件
+        
+        # 将 self.obs 写入文件，测试用
         file_path = "/home/mmj/sim2real_g2w/unitree_rl_gym/deploy/observations.log"  # 文件路径
         with open(file_path, "a") as file:  # 以追加模式打开文件
         # 将 self.obs 转换为字符串并写入文件
             file.write(",".join(map(str, self.obs)) + "\n")
 
-        # region ########### 指令发送 ###########
-        # 腿部关节指令设置
-        for i in range(len(self.config.joint2motor_idx)):
-            motor_idx = self.config.joint2motor_idx[i]
-            self.low_cmd.motor_cmd[motor_idx].q = target_dof_pos[i]
-            self.low_cmd.motor_cmd[motor_idx].qd = 0
-            self.low_cmd.motor_cmd[motor_idx].kp = self.config.kps[i]
-            self.low_cmd.motor_cmd[motor_idx].kd = self.config.kds[i]
-            self.low_cmd.motor_cmd[motor_idx].tau = 0
+        # 根据观测值传入Policy函数获得Action
+        obs_tensor = torch.from_numpy(self.obs).unsqueeze(0)
+        self.action = self.policy(obs_tensor).detach().numpy().squeeze()
 
-        self.send_cmd(self.low_cmd)
-        time.sleep(self.config.control_dt)
-        # endregion
+        for i in range(len(self.config.joint2motor_idx)):
+            if i >= 12:
+                motor_idx = self.config.joint2motor_idx[i]
+                self.low_cmd.motor_cmd[motor_idx].q = self.action[i] * self.config.action_scale + self.qj
+                self.low_cmd.motor_cmd[motor_idx].qd = self.config.wheel_speed + self.dqj
+                self.low_cmd.motor_cmd[motor_idx].kp = self.config.kps[i]
+                self.low_cmd.motor_cmd[motor_idx].kd = self.config.kds[i]
+                self.low_cmd.motor_cmd[motor_idx].tau = 0
+            else:
+                motor_idx = self.config.joint2motor_idx[i]
+                self.low_cmd.motor_cmd[motor_idx].q = self.config.default_angles + self.action * self.config.action_scale
+                self.low_cmd.motor_cmd[motor_idx].qd = 0
+                self.low_cmd.motor_cmd[motor_idx].kp = self.config.kps[i]
+                self.low_cmd.motor_cmd[motor_idx].kd = self.config.kds[i]
+                self.low_cmd.motor_cmd[motor_idx].tau = 0
+
+        self.send_cmd(self.low_cmd) # 发送指令
+        time.sleep(self.config.control_dt) # 休眠控制间隔
 
 if __name__ == "__main__":
     # region ########### 程序入口 ###########

@@ -15,10 +15,10 @@ class GO2WRoughCfg( LeggedRobotCfg ):
         resampling_time = 10. # 指令更改的时间
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-1.5, 1.5] # min max [m/s] x轴方向线速度
-            lin_vel_y = [-0, 0]   # min max [m/s] y轴方向线速度
-            ang_vel_yaw = [-0, 0]    # min max [rad/s] 角速度
-            heading = [-3.14, 3.14] # 航向
+            lin_vel_x = [-0.5, 0.5] # min max [m/s] x轴方向线速度
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s] y轴方向线速度
+            ang_vel_yaw = [-1, 1]    # min max [rad/s] 角速度
+            heading = [-3.14, 3.14] # 航向 实际上没有使用这个维度
 
     # 地形类，被注释掉了？
     # class terrain(LeggedRobotCfg.terrain):
@@ -158,8 +158,8 @@ class GO2WRoughCfgPPO( LeggedRobotCfgPPO ):
         run_name = 'plain'
         experiment_name = 'rough_go2w'
         num_steps_per_env = 48 # per iteration
-        max_iterations = 1500
+        max_iterations = 10000
         # load_run = "/home/zifanw/rl_robot/legged-robots-manipulation/loco_manipulation_gym/logs/Go2w/Jan21_02-18-32_"
-        load_run = "/home/hu/csq/unitree_rl_gym/logs/rough_go2w/Mar21_11-43-16_plain"
+        load_run = "/home/hu/csq/unitree_rl_gym/logs/rough_go2w/Mar22_19-37-29_plain"
         # checkpoint =1550
   

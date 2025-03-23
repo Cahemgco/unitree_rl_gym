@@ -51,39 +51,54 @@ class Go2w(LeggedRobot):
         # 裁剪后的观测值，额外的观测信息，奖励缓冲区，重置缓冲区，额外信息 
 
     def post_physics_step(self):
-        """ check terminations, compute observations and rewards
+        """ check terminations, compute observations and rewards  检查是否终止训练、计算观测值和奖励
             calls self._post_physics_step_callback() for common computations 
             calls self._draw_debug_vis() if needed
         """
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
+        # 表示机器人基座的状态
+        # 3个浮点数表示位置，4个浮点数表示四元数，3个浮点数表示线速度，3个浮点数表示角速度
+        # (num_actors, 13)
         rigid_body_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        # 表示机器人每一部分的状态
+        # 3个浮点数表示位置，4个浮点数表示四元数，3个浮点数表示线速度，3个浮点数表示角速度
+        # (num_actors, num_rigid_bodys, 13)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
+        # 表示机器人每个DOF的状态
+        # 多个DOF，每个DOF状态由两个浮点数表示：DOF位置和DOF速度
+        # 平移DOF：m,m/s; 旋转DOF：弧度，弧度/s
+        # (num_actors, num_dofs, 2) 
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        # 包含每个刚体在最后一个模拟步骤中经历的净接触力
+        # 数据都是按顺序排列，首先是actor1的所有信息，然后是actor2的所有信息，巴拉巴拉……
 
         
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
-        
+        # 作用是实时获取最新的以上这些信息
         
         self.root_states = gymtorch.wrap_tensor(actor_root_state).view(-1, 13)
-       
+        # 机器人基座信息：3个浮点数表示位置，4个浮点数表示四元数，3个浮点数表示线速度，3个浮点数表示角速度
         
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_tensor).view(self.num_envs, -1, 13)
+        # 机器人各部分刚体信息
+
         self.gripperMover_handles = self.gym.find_asset_rigid_body_index(self.robot_asset, "gripper_link")
         self.base_handles = self.gym.find_asset_rigid_body_index(self.robot_asset, "base_link")
         self._gripper_state = self.rigid_body_states[:, self.gripperMover_handles][:, 0:13]
         self._gripper_pos = self.rigid_body_states[:, self.gripperMover_handles][:, 0:3]
-        
         self._gripper_rot = self.rigid_body_states[:, self.gripperMover_handles][:, 3:7]
         self.base_pos = self.rigid_body_states[:, self.base_handles][:, 0:3]
+        # 这部分是那篇论文中的将基座和基座上固定的机械手的信息拿取出来
         
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
-        self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
-        self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
-        self.base_quat = self.root_states[:, 3:7]
+        self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0] # 各DOF位置信息
+        self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1] # 各DOF速度信息
+        self.base_quat = self.root_states[:, 3:7] # 机器人基座四元数信息
         self._local_gripper_pos = quat_rotate_inverse(self.base_quat,self.base_pos - self._gripper_pos) 
+        # 这个应该还是获得机械抓手的位置的
         #get local frame quat
         #self.local_frame_quat = 
 
@@ -94,10 +109,11 @@ class Go2w(LeggedRobot):
         self.common_step_counter += 1
 
         # prepare quantities
-        self.base_quat[:] = self.root_states[:, 3:7]
+        self.base_quat[:] = self.root_states[:, 3:7] # 机器人基座四元数信息
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        # 根据四元数信息将机器人在世界坐标系中的线速度、角速度、重力向量转换为机器人坐标系
 
         self._post_physics_step_callback()
 
@@ -114,7 +130,7 @@ class Go2w(LeggedRobot):
 
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
-        self.last_root_vel[:] = self.root_states[:, 7:13]
+        self.last_root_vel[:] = self.root_states[:, 7:13]  # 保留上一时刻action、所有DOF速度、机器人基座线速度、角速度
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
@@ -204,18 +220,21 @@ class Go2w(LeggedRobot):
 
         self.base_height_command = torch.tensor(self.cfg.rewards.base_height_target,dtype=torch.float,device=self.device)
         self.base_height_command = self.base_height_command.unsqueeze(0).repeat(self.num_envs,1)
-        self.dof_err = self.dof_pos - self.default_dof_pos
-        self.dof_err[:,self.wheel_indices] = 0
-        self.dof_pos[:,self.wheel_indices] = 0
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel, # 机器人基座线速度 解决
-                                    self.base_ang_vel  * self.obs_scales.ang_vel, # 机器人基座角速度 解决
-                                    self.projected_gravity, # 重力向量 解决
-                                    self.commands[:, :3] * self.commands_scale, # 外部控制命令 解决
-                                    # self.base_height_command, # 基座机器人高度
-                                    self.dof_err * self.obs_scales.dof_pos, # 关节误差 待确认
-                                    self.dof_vel * self.obs_scales.dof_vel, # 关节速度 待确认
-                                    self.dof_pos, # 关节位置 待确认
-                                    self.actions, # 动作输入 解决
+        self.dof_err = self.dof_pos - self.default_dof_pos # 机器人当前各DOF位置 - 机器人默认各DOF位置 看作一种位置的偏差值
+        self.dof_err[:,self.wheel_indices] = 0 # 轮子的位置偏差值设置为0，因为轮子在每个位置都是一样的
+        self.dof_pos[:,self.wheel_indices] = 0 # 轮子的关节位置设置为0，理由同上
+        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel, # 机器人坐标下的基座线速度 * 2.0
+                                    self.base_ang_vel  * self.obs_scales.ang_vel, # 机器人坐标下的基座角速度 * 0.25
+                                    self.projected_gravity, # 机器人坐标系下重力向量 
+                                    self.commands[:, :3] * self.commands_scale, 
+                                    # X轴线速度 Y轴线速度 角速度指令
+                                    # 外部控制命令 * [lin_vel, lin_vel, ang_vel] = [2.0, 2.0, 0.25]
+                                    # self.base_height_command, # 基座机器人高度 go2w难以测量，注释掉了
+                                    # 在训练中command命令是一段采样时间后随机生成的
+                                    self.dof_err * self.obs_scales.dof_pos, # 关节误差 * 1.0
+                                    self.dof_vel * self.obs_scales.dof_vel, # 机器人各DOF速度 * 0.05
+                                    self.dof_pos, # 机器人各DOF位置
+                                    self.actions, # 动作输入
                                     ),dim=-1)
         # lin_vel = 2.0 ang_vel = 0.25 dof_pos = 1.0 dof_vel = 0.05 height_measurements = 5.0 clip_observations = 100. clip_actions = 100.
         # add perceptive inputs if not blind
@@ -234,7 +253,7 @@ class Go2w(LeggedRobot):
     def create_sim(self):
         """ Creates simulation, terrain and evironments
         """
-        self.up_axis_idx = 2 # 2 for z, 1 for y -> adapt gravity accordingly
+        self.up_axis_idx = 2 # 2 for z, 1 for y -> adapt gravity accordingly 表示在z轴的重力作用
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         mesh_type = self.cfg.terrain.mesh_type
         if mesh_type in ['heightfield', 'trimesh']:
@@ -348,13 +367,14 @@ class Go2w(LeggedRobot):
         """
         self.commands[env_ids, 0] = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         self.commands[env_ids, 1] = torch_rand_float(self.command_ranges["lin_vel_y"][0], self.command_ranges["lin_vel_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        # 按照go2w_config.py文件中的x和y轴方向速度的最大和最小值生成随机指令
         if self.cfg.commands.heading_command:
             self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         else:
             self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-
+        # 选择生成角速度指令还是朝向指令
         # set small commands to zero
-        self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
+        self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1) # 让角速度指令中很小的指令设置成0
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -368,11 +388,11 @@ class Go2w(LeggedRobot):
             [torch.Tensor]: Torques sent to the simulation
         """
         #pd controller
-        dof_err = self.default_dof_pos - self.dof_pos
-        dof_err[:,self.wheel_indices] =  0
-        self.dof_vel[:,self.wheel_indices] =  -self.cfg.control.wheel_speed
-        actions_scaled = actions * self.cfg.control.action_scale
-        control_type = self.cfg.control.control_type
+        dof_err = self.default_dof_pos - self.dof_pos # 各DOF默认位置 - 目前各DOF位置
+        dof_err[:,self.wheel_indices] =  0 # 轮子的误差是0
+        self.dof_vel[:,self.wheel_indices] =  -self.cfg.control.wheel_speed # 设置轮子的DOF速度为wheel_speed: 1
+        actions_scaled = actions * self.cfg.control.action_scale # action * 0.25
+        control_type = self.cfg.control.control_type # 其实就是P
         if control_type=="P":
             torques = self.p_gains*(actions_scaled + dof_err) - self.d_gains*self.dof_vel
         elif control_type=="V":
@@ -515,6 +535,7 @@ class Go2w(LeggedRobot):
         self.extras = {}
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
+        # 为所有机器人创造相同的重力向量
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -529,7 +550,7 @@ class Go2w(LeggedRobot):
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
-        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec) # 将重力向量转换为基座坐标下的重力向量
         self._local_cube_object_pos = torch.zeros((self.num_envs,3),dtype=torch.float,device=self.device)
         self._local_cube_object_pos = torch.tensor([0.25,0.004,0.3],dtype=torch.float,device=self.device).repeat(self.num_envs,1)
         if self.cfg.terrain.measure_heights:
@@ -541,14 +562,14 @@ class Go2w(LeggedRobot):
         self.init_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         for i in range(self.num_dofs):
             name = self.dof_names[i]
-            angle = self.cfg.init_state.default_joint_angles[name]
-            self.default_dof_pos[i] = angle
-            self.init_dof_pos[i] = self.cfg.init_state.init_joint_angles[name]
+            angle = self.cfg.init_state.default_joint_angles[name] # go2w_config.py中设置的default_joint_angles
+            self.default_dof_pos[i] = angle # 存储机器人各DOF默认位置
+            self.init_dof_pos[i] = self.cfg.init_state.init_joint_angles[name] # 和default_joint_angles是一样的设置
             found = False
             for dof_name in self.cfg.control.stiffness.keys():
                 if dof_name in name:
-                    self.p_gains[i] = self.cfg.control.stiffness[dof_name]
-                    self.d_gains[i] = self.cfg.control.damping[dof_name]
+                    self.p_gains[i] = self.cfg.control.stiffness[dof_name]  # [N*m/rad] 刚度系数k_p 
+                    self.d_gains[i] = self.cfg.control.damping[dof_name] # [N*m*s/rad] 阻尼系数k_d
                     found = True
             if not found:
                 self.p_gains[i] = 0.

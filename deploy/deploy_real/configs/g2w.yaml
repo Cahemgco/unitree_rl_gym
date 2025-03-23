@@ -10,19 +10,21 @@ lowstate_topic: "rt/lowstate"
 policy_path: "/home/mmj/sim2real_g2w/unitree_rl_gym/deploy/pre_train/g2w/motion.pt"
 
 joint2motor_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-kps: [25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 20, 20, 20, 20]
-kds: [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.5, 0.5, 0.5, 0.5]
+kps: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 20, 20, 20, 20]
+kds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5]
 
 default_angles: [0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.67, -1.3, 0.0, 0.0, 0.0, 0.0]
 
+lin_vel_scale: 2.0
 ang_vel_scale: 0.25
-dof_pos_scale: 1.0
+cmd_scale: [0.5, 0.5, 0.25]
+dof_err_scale: 1.0
 dof_vel_scale: 0.05
-action_scale: 0.4
-cmd_scale: [2.0, 2.0, 0.25]
+
+action_scale: 0.25
+
 num_actions: 16
 num_obs: 76
 
-max_cmd: [0.8, 0.5, 1.57]
-
 wheel_indices: [12, 13, 14, 15]
+wheel_speed: 1
