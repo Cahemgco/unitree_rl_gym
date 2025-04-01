@@ -223,7 +223,7 @@ class Go2w(LeggedRobot):
         self.dof_err = self.dof_pos - self.default_dof_pos # 机器人当前各DOF位置 - 机器人默认各DOF位置 看作一种位置的偏差值
         self.dof_err[:,self.wheel_indices] = 0 # 轮子的位置偏差值设置为0，因为轮子在每个位置都是一样的
         self.dof_pos[:,self.wheel_indices] = 0 # 轮子的关节位置设置为0，理由同上
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel, # 机器人坐标下的基座线速度 * 2.0
+        self.obs_buf = torch.cat((  # self.base_lin_vel * self.obs_scales.lin_vel, # 机器人坐标下的基座线速度 * 2.0
                                     self.base_ang_vel  * self.obs_scales.ang_vel, # 机器人坐标下的基座角速度 * 0.25
                                     self.projected_gravity, # 机器人坐标系下重力向量 
                                     self.commands[:, :3] * self.commands_scale, 
@@ -779,6 +779,7 @@ class Go2w(LeggedRobot):
 
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt
+        print(self.dt)
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)

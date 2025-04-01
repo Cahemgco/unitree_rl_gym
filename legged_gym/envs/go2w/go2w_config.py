@@ -5,7 +5,7 @@ class GO2WRoughCfg( LeggedRobotCfg ):
     class env(LeggedRobotCfg.env):
         num_envs = 6000 # 强化学习同时训练智能体的数量
         num_actions = 16 # 可操控的动作数量
-        num_observations = 76 # 强化学习观测值的数量  
+        num_observations = 73 # 强化学习观测值的数量  
     
     # 机器人指令类
     class commands( LeggedRobotCfg ):
@@ -15,9 +15,9 @@ class GO2WRoughCfg( LeggedRobotCfg ):
         resampling_time = 10. # 指令更改的时间
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-0.5, 0.5] # min max [m/s] x轴方向线速度
-            lin_vel_y = [-0.5, 0.5]   # min max [m/s] y轴方向线速度
-            ang_vel_yaw = [-1, 1]    # min max [rad/s] 角速度
+            lin_vel_x = [0, 1] # min max [m/s] x轴方向线速度
+            lin_vel_y = [0, 0]   # min max [m/s] y轴方向线速度
+            ang_vel_yaw = [0, 0]    # min max [rad/s] 角速度
             heading = [-3.14, 3.14] # 航向 实际上没有使用这个维度
 
     # 地形类，被注释掉了？
@@ -99,8 +99,8 @@ class GO2WRoughCfg( LeggedRobotCfg ):
         # PD Drive parameters:
         control_type = 'P' # 位置控制、速度控制、扭矩控制
         
-        stiffness = {'hip_joint': 50.,'thigh_joint': 50.,'calf_joint': 50.,"foot_joint":20}  # [N*m/rad] 刚度系数k_p 
-        damping = {'hip_joint': 1,'thigh_joint': 1,'calf_joint': 1,"foot_joint":0.5}     # [N*m*s/rad] 阻尼系数k_d
+        stiffness = {'hip_joint': 70.,'thigh_joint': 70.,'calf_joint': 70.,"foot_joint":20}  # [N*m/rad] 刚度系数k_p 
+        damping = {'hip_joint': 5,'thigh_joint': 5,'calf_joint': 5,"foot_joint":0.5}     # [N*m*s/rad] 阻尼系数k_d
         # action scale: target angle = actionScale * action + defaultAngle
         # 乘一个缩放因子，目的是让动作值适应不同关节的运动范围
         action_scale = 0.25
@@ -158,8 +158,8 @@ class GO2WRoughCfgPPO( LeggedRobotCfgPPO ):
         run_name = 'plain'
         experiment_name = 'rough_go2w'
         num_steps_per_env = 48 # per iteration
-        max_iterations = 10000
+        max_iterations = 20000
         # load_run = "/home/zifanw/rl_robot/legged-robots-manipulation/loco_manipulation_gym/logs/Go2w/Jan21_02-18-32_"
-        load_run = "/home/hu/csq/unitree_rl_gym/logs/rough_go2w/Mar22_19-37-29_plain"
+        load_run = "/home/hu/csq/unitree_rl_gym/logs/rough_go2w/Mar28_14-33-29_plain"
         # checkpoint =1550
   

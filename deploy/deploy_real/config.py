@@ -26,7 +26,8 @@ class Config:
             self.kps = config["kps"]
             self.kds = config["kds"]
 
-            self.default_angles = np.array(config["default_angles"], dtype=np.float32)
+            self.default_sim_angles = np.array(config["default_sim_angles"], dtype=np.float32)
+            self.default_real_angles = np.array(config["default_real_angles"], dtype=np.float32)
 
             # self.arm_waist_joint2motor_idx = config["arm_waist_joint2motor_idx"]
             # self.arm_waist_kps = config["arm_waist_kps"]
@@ -44,7 +45,8 @@ class Config:
             self.num_actions = config["num_actions"]
             self.num_obs = config["num_obs"]
 
-            self.wheel_indices = config['wheel_indices']
+            self.wheel_real_indices = config['wheel_real_indices']
+            self.wheel_sim_indices = config['wheel_sim_indices']
             self.wheel_speed = config['wheel_speed']
 
 

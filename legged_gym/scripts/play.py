@@ -17,7 +17,7 @@ import torch
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 100)
+    env_cfg.env.num_envs = 100
     env_cfg.terrain.num_rows = 5
     env_cfg.terrain.num_cols = 5
     env_cfg.terrain.curriculum = False
@@ -30,8 +30,12 @@ def play(args):
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations() # 获得观测的环境信息
+    obs[:, 6] = 1.0
+    obs[:, 7] = 0.0
+    obs[:, 8] = 0.0
     obs_size = obs.size()
     print("Observation tensor size:", obs_size)
+
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
@@ -39,13 +43,32 @@ def play(args):
     
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
-        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
+        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'only_x_20000')
         export_policy_as_jit(ppo_runner.alg.actor_critic, path)
         print('Exported policy as jit script to: ', path)
 
+    action_file_path = "/home/hu/csq/unitree_rl_gym/deploy/actions_sim.log"
+    obs_file_path = "/home/hu/csq/unitree_rl_gym/deploy/obs_sim.log"
+
+    # 将观测数据追加到文件中
+    with open(obs_file_path, "a") as obs_file:
+        obs_file.write(",".join(map(str, obs.cpu().detach().numpy()[0])) + "\n")
+
     for i in range(10*int(env.max_episode_length)):
         actions = policy(obs.detach()) # 将张量obs从计算图中分离出来，避免梯度传播
+
+        # with open(action_file_path, "a") as action_file:
+        #     action_file.write(",".join(map(str, actions.cpu().detach().numpy()[0])) + "\n")
+        
         obs, _, rews, dones, infos = env.step(actions.detach()) # 获得新的观测
+    
+        obs[:, 6] = 1.0
+        obs[:, 7] = 0.0
+        obs[:, 8] = 0.0
+        
+        # 将观测数据追加到文件中
+        with open(obs_file_path, "a") as obs_file:
+            obs_file.write(",".join(map(str, obs.cpu().detach().numpy()[0])) + "\n")
 
 if __name__ == '__main__':
     EXPORT_POLICY = True
